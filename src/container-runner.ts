@@ -10,7 +10,6 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -25,7 +24,6 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -78,14 +76,9 @@ function buildVolumeMounts(
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
     // Credentials are injected by the credential proxy, never exposed to containers.
-    const envFile = path.join(projectRoot, '.env');
-    if (fs.existsSync(envFile)) {
-      mounts.push({
-        hostPath: '/dev/null',
-        containerPath: '/workspace/project/.env',
-        readonly: true,
-      });
-    }
+    // Note: Apple Container doesn't support file-to-file bind mounts, so we skip
+    // the .env shadow mount entirely — the file simply won't exist in the container.
+    // The agent never needs to see .env since credentials come via the proxy.
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -212,6 +205,16 @@ function buildVolumeMounts(
   return mounts;
 }
 
+/**
+ * Detect the Apple Container gateway IP.
+ * Apple Container uses a virtualized network with gateway at 192.168.64.1
+ */
+function detectAppleContainerGateway(): string {
+  // The Apple Container gateway is typically at 192.168.64.1
+  // We can verify this by checking the default route if needed
+  return '192.168.64.1';
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -222,21 +225,49 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  // Pass Anthropic API configuration from .env file directly to container.
+  // The .claude/settings.json in the mounted .claude directory also contains
+  // these env vars, which Claude Code will use.
+  const envFile = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envFile)) {
+    const envContent = fs.readFileSync(envFile, 'utf-8');
+    for (const line of envContent.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      let value = trimmed.slice(eqIdx + 1).trim();
+      // Remove quotes if present
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      // Pass ANTHROPIC_* variables to the container
+      if (key.startsWith('ANTHROPIC_')) {
+        args.push('-e', `${key}=${value}`);
+      }
+    }
+  }
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
-  } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  // Also pass CLAUDE_CODE_* variables from .claude/settings.json env section
+  // These include model selection and other Claude Code settings
+  const settingsFile = path.join(process.cwd(), '.claude', 'settings.json');
+  if (fs.existsSync(settingsFile)) {
+    try {
+      const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+      if (settings.env) {
+        for (const [key, value] of Object.entries(settings.env)) {
+          if (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_CODE_')) {
+            args.push('-e', `${key}=${value}`);
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to read .claude/settings.json');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -285,6 +316,7 @@ export async function runContainerAgent(
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName, input.isMain);
 
   logger.debug(

@@ -1,0 +1,58 @@
+{
+  "sessions": {
+    "0789c1da-1d0f-4b23-8a98-03c87efef86e": {
+      "user_message_count": 13,
+      "agent_message_count": 97,
+      "start_timestamp": "2026-03-25T15:04:57.204Z",
+      "end_timestamp": "2026-03-25T15:04:40.408Z",
+      "markdown_size_bytes": 117266,
+      "provider": "claude-code",
+      "last_updated": "2026-03-25T15:30:09Z"
+    },
+    "86040e31-ece8-4776-b12d-1786667f11a0": {
+      "user_message_count": 3,
+      "agent_message_count": 28,
+      "start_timestamp": "2026-03-25T15:58:51.835Z",
+      "end_timestamp": "2026-03-25T15:58:47.486Z",
+      "markdown_size_bytes": 13374,
+      "provider": "claude-code",
+      "last_updated": "2026-03-25T16:08:49Z"
+    },
+    "8c873862-300a-4cd1-90e2-efea3a583689": {
+      "user_message_count": 6,
+      "agent_message_count": 358,
+      "start_timestamp": "2026-03-26T03:03:36.083Z",
+      "end_timestamp": "2026-03-26T03:43:10.980Z",
+      "markdown_size_bytes": 266866,
+      "provider": "claude-code",
+      "last_updated": "2026-03-26T03:43:11Z"
+    },
+    "bc1cee1f-7c93-43f5-972e-84c8dba22220": {
+      "user_message_count": 3,
+      "agent_message_count": 25,
+      "start_timestamp": "2026-03-25T22:48:41+08:00",
+      "end_timestamp": "2026-03-25T22:48:41+08:00",
+      "markdown_size_bytes": 24598,
+      "provider": "cursoride",
+      "last_updated": "2026-03-25T15:28:17Z"
+    },
+    "c0e3df91-6d37-4934-9285-80f12bcead0f": {
+      "user_message_count": 5,
+      "agent_message_count": 429,
+      "start_timestamp": "2026-03-26T01:01:08.341Z",
+      "end_timestamp": "2026-03-26T01:01:08.341Z",
+      "markdown_size_bytes": 320686,
+      "provider": "claude-code",
+      "last_updated": "2026-03-26T02:35:10Z"
+    },
+    "e9820736-6e50-4d14-8eb8-74b6c29710c6": {
+      "user_message_count": 10,
+      "agent_message_count": 322,
+      "start_timestamp": "2026-03-25T23:28:00+08:00",
+      "end_timestamp": "2026-03-25T23:28:00+08:00",
+      "markdown_size_bytes": 572504,
+      "provider": "cursoride",
+      "last_updated": "2026-03-26T02:45:43Z"
+    }
+  }
+}

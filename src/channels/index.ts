@@ -5,6 +5,9 @@
 
 // gmail
 
+// lark
+import './lark.js';
+
 // slack
 
 // telegram

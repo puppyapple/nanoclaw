@@ -112,6 +112,8 @@ export async function run(_args: string[]): Promise<void> {
     'SLACK_BOT_TOKEN',
     'SLACK_APP_TOKEN',
     'DISCORD_BOT_TOKEN',
+    'LARK_APP_ID',
+    'LARK_APP_SECRET',
   ]);
 
   const channelAuth: Record<string, string> = {};
@@ -134,6 +136,13 @@ export async function run(_args: string[]): Promise<void> {
   }
   if (process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN) {
     channelAuth.discord = 'configured';
+  }
+  // Lark: check for app credentials
+  if (
+    (process.env.LARK_APP_ID || envVars.LARK_APP_ID) &&
+    (process.env.LARK_APP_SECRET || envVars.LARK_APP_SECRET)
+  ) {
+    channelAuth.lark = 'configured';
   }
 
   const configuredChannels = Object.keys(channelAuth);

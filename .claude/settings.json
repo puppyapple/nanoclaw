@@ -1,1 +1,9 @@
-{}
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "ANTHROPIC_API_KEY": "sk-6e6205481e6747759e15b5f2a69aaf4e",
+    "ANTHROPIC_MODEL": "qwen3.5-plus",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_SKIP_FAST_MODE_NETWORK_ERRORS": "1"
+  }
+}

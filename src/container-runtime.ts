@@ -19,41 +19,21 @@ export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
  * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
  *   falling back to 0.0.0.0 if the interface isn't found.
+ * Apple Container (macOS): 0.0.0.0 — containers can't reach host localhost, so we
+ *   must bind to all interfaces and rely on firewall/NAT isolation.
  */
 export const PROXY_BIND_HOST =
   process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
-
-  // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
-  // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
-  if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
-
-  // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
-  const ifaces = os.networkInterfaces();
-  const docker0 = ifaces['docker0'];
-  if (docker0) {
-    const ipv4 = docker0.find((a) => a.family === 'IPv4');
-    if (ipv4) return ipv4.address;
+  if (os.platform() === 'darwin') {
+    // Apple Container can't reach host localhost, bind to all interfaces
+    if (CONTAINER_RUNTIME_BIN === 'container') {
+      return '0.0.0.0';
+    }
+    // Docker Desktop on macOS can reach localhost
+    return '127.0.0.1';
   }
-  return '0.0.0.0';
-}
-
-/** Hostname containers use to reach the host machine. */
-export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
-
-/**
- * Address the credential proxy binds to.
- * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
- * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
- *   falling back to 0.0.0.0 if the interface isn't found.
- */
-export const PROXY_BIND_HOST =
-  process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
-
-function detectProxyBindHost(): string {
-  if (os.platform() === 'darwin') return '127.0.0.1';
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
   // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
@@ -71,16 +51,26 @@ function detectProxyBindHost(): string {
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  // Docker Desktop (macOS/WSL) auto-resolves host.docker.internal.
+  // Apple Container (macOS) doesn't support --add-host, so we need to use
+  // a different approach: set the ANTHROPIC_BASE_URL directly to the host IP.
   if (os.platform() === 'linux') {
     return ['--add-host=host.docker.internal:host-gateway'];
   }
+  // macOS with Apple Container: host.docker.internal should work natively
+  // as Apple Container uses the host's network stack for DNS
   return [];
 }
 
 /** Returns CLI args for a readonly bind mount. */
-export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
-  return ['--mount', `type=bind,source=${hostPath},target=${containerPath},readonly`];
+export function readonlyMountArgs(
+  hostPath: string,
+  containerPath: string,
+): string[] {
+  return [
+    '--mount',
+    `type=bind,source=${hostPath},target=${containerPath},readonly`,
+  ];
 }
 
 /** Returns the shell command to stop a container by name. */
@@ -96,7 +86,10 @@ export function ensureContainerRuntimeRunning(): void {
   } catch {
     logger.info('Starting container runtime...');
     try {
-      execSync(`${CONTAINER_RUNTIME_BIN} system start`, { stdio: 'pipe', timeout: 30000 });
+      execSync(`${CONTAINER_RUNTIME_BIN} system start`, {
+        stdio: 'pipe',
+        timeout: 30000,
+      });
       logger.info('Container runtime started');
     } catch (err) {
       logger.error({ err }, 'Failed to start container runtime');
@@ -136,17 +129,26 @@ export function cleanupOrphans(): void {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
+    const containers: { status: string; configuration: { id: string } }[] =
+      JSON.parse(output || '[]');
     const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .filter(
+        (c) =>
+          c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'),
+      )
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
