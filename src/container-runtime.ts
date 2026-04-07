@@ -62,6 +62,40 @@ export function hostGatewayArgs(): string[] {
   return [];
 }
 
+/**
+ * Get the base URL for containers to reach the credential proxy.
+ * For Apple Container on macOS, containers can't reach external networks,
+ * so they must use the proxy via the gateway IP.
+ */
+export function getContainerProxyUrl(proxyPort: number = 3001): string {
+  if (os.platform() === 'darwin' && CONTAINER_RUNTIME_BIN === 'container') {
+    const gateway = detectAppleContainerGateway();
+    return `http://${gateway}:${proxyPort}`;
+  }
+  return '';
+}
+
+/**
+ * Detect the Apple Container gateway IP dynamically.
+ */
+export function detectAppleContainerGateway(): string {
+  try {
+    const output = execSync(`${CONTAINER_RUNTIME_BIN} network inspect default --format json`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    const networks = JSON.parse(output || '[]');
+    if (Array.isArray(networks) && networks.length > 0) {
+      const gateway = networks[0]?.status?.ipv4Gateway;
+      if (gateway) return gateway;
+    }
+  } catch (err) {
+    logger.debug({ err }, 'Failed to detect Apple Container gateway, using default');
+  }
+  // Fallback to the most common default
+  return '192.168.64.1';
+}
+
 /** Returns CLI args for a readonly bind mount. */
 export function readonlyMountArgs(
   hostPath: string,
@@ -73,9 +107,12 @@ export function readonlyMountArgs(
   ];
 }
 
-/** Returns the shell command to stop a container by name. */
-export function stopContainer(name: string): string {
-  return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
+/** Stop a container by name. Uses execSync to avoid shell injection. */
+export function stopContainer(name: string): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
+    throw new Error(`Invalid container name: ${name}`);
+  }
+  execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
 }
 
 /** Ensure the container runtime is running, starting it if needed. */
@@ -139,7 +176,7 @@ export function cleanupOrphans(): void {
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
-        execSync(stopContainer(name), { stdio: 'pipe' });
+        stopContainer(name);
       } catch {
         /* already stopped */
       }
