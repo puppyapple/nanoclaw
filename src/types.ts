@@ -84,10 +84,18 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+export interface FileAttachment {
+  filePath: string; // Absolute path on host filesystem
+  fileName?: string; // Display name in the chat
+  caption?: string; // Optional text caption alongside the file
+  mimeType?: string; // Optional — auto-detected if omitted
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
+  sendFile?(jid: string, file: FileAttachment): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

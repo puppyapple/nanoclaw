@@ -68,6 +68,55 @@ server.tool(
 );
 
 server.tool(
+  'send_file',
+  'Send a file to the user or group. The file must exist on the container filesystem. Common paths: /workspace/group/ (group folder), /Users/zijunwu/Documents/ClawWorld/ (shared output directory).',
+  {
+    filePath: z
+      .string()
+      .describe(
+        'Absolute path to the file in the container (e.g., /workspace/group/report.pdf)',
+      ),
+    fileName: z
+      .string()
+      .optional()
+      .describe('Display name for the file in the chat'),
+    caption: z
+      .string()
+      .optional()
+      .describe('Optional caption text shown alongside the file'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.filePath)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `File not found: ${args.filePath}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'send_file',
+      chatJid,
+      filePath: args.filePath,
+      fileName: args.fileName || undefined,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: 'File send queued.' }],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 

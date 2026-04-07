@@ -3,15 +3,16 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
-import { AvailableGroup } from './container-runner.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { getVolumeMounts, AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, FileAttachment } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendFile: (jid: string, file: FileAttachment) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -26,6 +27,40 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+
+/**
+ * Translate a container path to the corresponding host path
+ * using the volume mounts for the given group.
+ */
+function translateContainerPath(
+  containerPath: string,
+  groupFolder: string,
+  isMain: boolean,
+): string {
+  if (!containerPath.startsWith('/')) return containerPath;
+
+  const mounts = getVolumeMounts(
+    { name: '', folder: groupFolder, trigger: '', added_at: '' },
+    isMain,
+  );
+
+  // Longest-prefix match: sort by containerPath length descending
+  mounts.sort((a, b) => b.containerPath.length - a.containerPath.length);
+
+  for (const mount of mounts) {
+    const cp = mount.containerPath.endsWith('/')
+      ? mount.containerPath
+      : mount.containerPath + '/';
+    if (containerPath.startsWith(cp)) {
+      const hp = mount.hostPath.endsWith('/')
+        ? mount.hostPath
+        : mount.hostPath + '/';
+      return containerPath.replace(cp, hp);
+    }
+  }
+
+  return containerPath;
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -90,6 +125,39 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'send_file' &&
+                data.chatJid &&
+                data.filePath
+              ) {
+                // Authorization: same as message
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  // Translate container path to host path
+                  const hostPath = translateContainerPath(
+                    data.filePath,
+                    sourceGroup,
+                    isMain,
+                  );
+                  const attachment: FileAttachment = {
+                    filePath: hostPath,
+                    fileName: data.fileName,
+                    caption: data.caption,
+                  };
+                  await deps.sendFile(data.chatJid, attachment);
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, filePath: hostPath },
+                    'IPC file sent',
+                  );
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC file send attempt blocked',
                   );
                 }
               }

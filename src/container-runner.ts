@@ -321,7 +321,10 @@ function buildContainerArgs(
     });
     // Remove orphaned -e flags (every other -e after removal)
     args.push('-e', `ANTHROPIC_BASE_URL=${proxyBaseUrl}`);
-    logger.debug({ gateway, proxyBaseUrl }, 'Using credential proxy for Apple Container');
+    logger.debug(
+      { gateway, proxyBaseUrl },
+      'Using credential proxy for Apple Container',
+    );
   }
 
   // Runtime-specific args for host gateway resolution

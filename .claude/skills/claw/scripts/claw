@@ -63,10 +63,43 @@ SECRET_KEYS = [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
     "OLLAMA_HOST",
 ]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def detect_gateway() -> str | None:
+    """Detect the Apple Container host gateway IP via network inspect."""
+    try:
+        result = subprocess.run(
+            ["container", "network", "inspect", "default"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            networks = json.loads(result.stdout)
+            if networks and isinstance(networks, list):
+                return networks[0].get("status", {}).get("ipv4Gateway")
+    except Exception:
+        pass
+    return None
+
+
+def rewrite_env_for_container(env_vars: dict, runtime: str) -> dict:
+    """For Apple Container, rewrite ANTHROPIC_BASE_URL to use the host credential proxy."""
+    if runtime != "container" or "ANTHROPIC_BASE_URL" not in env_vars:
+        return env_vars
+    import platform
+    if platform.system() != "Darwin":
+        return env_vars
+    gateway = detect_gateway()
+    if not gateway:
+        return env_vars
+    # The credential proxy on the host listens on port 3001 and handles
+    # all /apps/anthropic/* paths. No need to preserve the original domain.
+    env_vars["ANTHROPIC_BASE_URL"] = f"http://{gateway}:3001/apps/anthropic"
+    return env_vars
+
 
 def detect_runtime(preference: str | None) -> str:
     if preference:
@@ -152,6 +185,23 @@ def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
     return mounts
 
 
+def read_env_vars(env_file: Path) -> dict:
+    """Read all ANTHROPIC_* and CLAUDE_CODE_* variables from .env."""
+    env_vars = {}
+    if not env_file.exists():
+        return env_vars
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            key = key.strip()
+            if key.startswith("ANTHROPIC_") or key.startswith("CLAUDE_CODE_"):
+                env_vars[key] = val.strip()
+    return env_vars
+
+
 def run_container(runtime: str, image: str, payload: dict,
                   folder: str | None = None, is_main: bool = False,
                   timeout: int = 300) -> None:
@@ -162,6 +212,20 @@ def run_container(runtime: str, image: str, payload: dict,
                 cmd += ["--mount", f"type=bind,source={host},target={container},readonly"]
             else:
                 cmd += ["-v", f"{host}:{container}"]
+    # Pass ANTHROPIC_* and CLAUDE_CODE_* env vars from .env to container,
+    # matching how the host's container-runner.ts configures containers.
+    env_vars = read_env_vars(ENV_FILE)
+    # For Apple Container, rewrite ANTHROPIC_BASE_URL to use the host credential proxy
+    env_vars = rewrite_env_for_container(env_vars, runtime)
+    for key, val in env_vars.items():
+        cmd += ["-e", f"{key}={val}"]
+
+    # Drop privileges inside the container so claude-code's
+    # --allow-dangerously-skip-permissions works (refused as root).
+    # Matches the pattern in container-runner.ts: main containers start as
+    # root then drop via setpriv in entrypoint.sh using RUN_UID/RUN_GID.
+    cmd += ["-e", "RUN_UID=501", "-e", "RUN_GID=20", "-e", "HOME=/home/node"]
+
     cmd.append(image)
     dbg(f"cmd: {' '.join(cmd)}")
 

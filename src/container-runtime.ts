@@ -80,17 +80,23 @@ export function getContainerProxyUrl(proxyPort: number = 3001): string {
  */
 export function detectAppleContainerGateway(): string {
   try {
-    const output = execSync(`${CONTAINER_RUNTIME_BIN} network inspect default --format json`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-    });
+    const output = execSync(
+      `${CONTAINER_RUNTIME_BIN} network inspect default --format json`,
+      {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    );
     const networks = JSON.parse(output || '[]');
     if (Array.isArray(networks) && networks.length > 0) {
       const gateway = networks[0]?.status?.ipv4Gateway;
       if (gateway) return gateway;
     }
   } catch (err) {
-    logger.debug({ err }, 'Failed to detect Apple Container gateway, using default');
+    logger.debug(
+      { err },
+      'Failed to detect Apple Container gateway, using default',
+    );
   }
   // Fallback to the most common default
   return '192.168.64.1';
